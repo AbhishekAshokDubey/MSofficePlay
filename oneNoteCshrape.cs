@@ -28,8 +28,10 @@ namespace ConsoleApplication3
         public static class Globals
         {
             //public static string imgDirPath = @"C:\Users\ad12183\Desktop\images"; // Modifiable in Code
-            public const string imgDirPath = @"C:\Users\ad12183\Desktop\images"; // Unmodifiable
-            //public const string oneNoteName = "pptSlideImages"; // Unmodifiable
+            public const string imgDirPath = @"C:\Users\ad12183\Desktop\images\images\extractedImages"; // Unmodifiable
+            public static Int16 imageCount = 0;
+            public const string oneNoteName = "OCRImages"; // Unmodifiable
+            public static List<string> imageNames = new List<string>();
         }
 
         /*
@@ -43,12 +45,24 @@ namespace ConsoleApplication3
         }
         */
 
+        static void waitScreen(int secondsCount) {
+            for (int i = secondsCount; i > 0 ; i--) {
+                Console.Clear();
+                Console.SetCursorPosition(1, 0);
+                Console.Write("waiting for " + i.ToString());
+                System.Threading.Thread.Sleep(1000);
+            }
+            Console.Clear();
+            Console.Write("Reading and saving the text from uploaded OneNote images");
+        }
+
         static void Main(string[] args)
         {
             //cleanAllUp("a");
             //CreatePage("sectionId", "pageName");
             writeNote();
-            System.Threading.Thread.Sleep(15000);
+            waitScreen(Globals.imageCount); // It takes oneNote time to do OCR before we could read it.
+            System.Threading.Thread.Sleep(Globals.imageCount * 1000);
             List<string> slideTextList = readNote();
             saveListToFile(slideTextList, "slideText.txt");
         }
@@ -71,8 +85,10 @@ namespace ConsoleApplication3
         }
 
 
-        static void saveListToFile(List<string> slideTextList, string textFileName) {
-            for (int i = 0; i < slideTextList.Count(); i++) {
+        static void saveListToFile(List<string> slideTextList, string textFileName)
+        {
+            for (int i = 0; i < slideTextList.Count(); i++)
+            {
                 //slideTextList[i] = slideTextList.ElementAt(i).Replace(System.Environment.NewLine, " ");
                 //slideTextList[i] = Regex.Replace(slideTextList.ElementAt(i), @"\r\n?|\n", " ");
                 slideTextList[i] = slideTextList.ElementAt(i).Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
@@ -86,7 +102,7 @@ namespace ConsoleApplication3
             string strNamespace = "http://schemas.microsoft.com/office/onenote/2010/onenote";
             string m_xmlImageContent = "<one:Image><one:Size width=\"{1}\" height=\"{2}\" isSetByUser=\"true\" /><one:Data>{0}</one:Data></one:Image>";
             string m_xmlNewOutline = "<?xml version=\"1.0\"?><one:Page xmlns:one=\"{2}\" ID=\"{1}\"><one:Title><one:OE><one:T><![CDATA[{3}]]></one:T></one:OE></one:Title>{0}</one:Page>";
-            string pageName = "OCRImages";
+            string pageName = Globals.oneNoteName;
 
             var onenoteApp = new Application();
 
@@ -95,23 +111,30 @@ namespace ConsoleApplication3
 
             var doc = XDocument.Parse(notebookXml);
             var ns = doc.Root.Name.Namespace;
-            var pageNode = doc.Descendants(ns + "Page").Where(n => n.Attribute("name").Value == "OCRImages").FirstOrDefault();
+            var pageNode = doc.Descendants(ns + "Page").Where(n => n.Attribute("name").Value == Globals.oneNoteName).FirstOrDefault();
             var existingPageId = pageNode.Attribute("ID").Value;
-
-            string[] fileEntries = Directory.GetFiles(Globals.imgDirPath);
-            foreach (string fileName in fileEntries)
+            if (pageNode != null)
             {
-                Bitmap bitmap = new Bitmap(fileName);
-                MemoryStream stream = new MemoryStream();
-                bitmap.Save(stream, ImageFormat.Jpeg);
-                string fileString = Convert.ToBase64String(stream.ToArray());
-
-                if (pageNode != null)
+                string[] fileEntries = Directory.GetFiles(Globals.imgDirPath);
+                foreach (string fileName in fileEntries)
                 {
+                    Bitmap bitmap = new Bitmap(fileName);
+                    MemoryStream stream = new MemoryStream();
+                    bitmap.Save(stream, ImageFormat.Jpeg);
+                    string fileString = Convert.ToBase64String(stream.ToArray());
+
+
                     string imageXmlStr = string.Format(m_xmlImageContent, fileString, bitmap.Width / 10, bitmap.Height / 10);
-                    string pageChangesXml = string.Format(m_xmlNewOutline, new object[] { imageXmlStr, existingPageId, strNamespace, pageName});
+                    string pageChangesXml = string.Format(m_xmlNewOutline, new object[] { imageXmlStr, existingPageId, strNamespace, pageName });
                     onenoteApp.UpdatePageContent(pageChangesXml.ToString(), DateTime.MinValue);
+                    Globals.imageNames.Add(fileName);
+                    Globals.imageCount++;
                 }
+            }
+            else {
+                Console.WriteLine(pageName + " Notebook not found.");
+                Environment.Exit(-1);
+
             }
         }
 
@@ -124,19 +147,25 @@ namespace ConsoleApplication3
 
             var doc = XDocument.Parse(notebookXml);
             var ns = doc.Root.Name.Namespace;
-            var notebookNode = doc.Descendants(ns + "Page").Where(n => n.Attribute("name").Value == "OCRImages").FirstOrDefault();
+            var notebookNode = doc.Descendants(ns + "Page").Where(n => n.Attribute("name").Value == Globals.oneNoteName).FirstOrDefault();
 
             string pageXml;
             onenoteApp.GetPageContent(notebookNode.Attribute("ID").Value, out pageXml);
 
             var parsedXML = XDocument.Parse(pageXml);
             List<string> slideTextList = new List<string>();
-
-            for (int i = 0; i < parsedXML.Descendants(ns + "OCRText").Count(); i++)
+            string textData;
+            for (int i = 0; i < Globals.imageCount; i++)
             {
                 ///XElement OCRTXML = parsedXML.Descendants(ns + "OCRText").FirstOrDefault();
-                XElement OCRTXML = parsedXML.Descendants(ns + "OCRText").ElementAt(i);
-                slideTextList.Add(OCRTXML.Value);
+                XElement OCRTXML = parsedXML.Descendants(ns + "Image").ElementAt(i).Descendants(ns + "OCRData").FirstOrDefault();
+                if (OCRTXML != null) {
+                    textData = OCRTXML.Value;
+                }
+                else {
+                    textData = "No text detected";
+                }
+                slideTextList.Add(Globals.imageNames.ElementAt(i) +": "+ textData);
             }
             return slideTextList;
         }
